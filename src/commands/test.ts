@@ -12,6 +12,7 @@ import {
 import { createAgentSocket } from "../ws/agent-socket.js";
 import { Asserts, type AssertOpts } from "../testing/asserts.js";
 import { FrameLog } from "../testing/frame-log.js";
+import { handleDevkitCapability } from "../testing/devkit-proxy.js";
 import chalk from "chalk";
 
 export interface TestOptions {
@@ -25,6 +26,18 @@ export interface TestOptions {
   logFile?: string;
   quiet?: boolean;
   json?: boolean;
+  /**
+   * SSH target for Local Ability proxying (`user@host`). When set, the
+   * test command intercepts `devkit-capability` frames from the cloud,
+   * SSH-execs `sudo python3 .../<cap>/devkit_functions.py <fn> <args>`
+   * on the DevKit, and ACKs with `devkit-capability-result`. Required
+   * for end-to-end tests of `category=local` abilities, since opening
+   * a fresh voice-stream WS displaces the kiosk session that would
+   * otherwise handle the dispatch.
+   */
+  proxyPi?: string;
+  /** Override the default `local_capabilities` directory path on the DevKit. */
+  proxyPiCapDir?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -213,6 +226,34 @@ export async function testCommand(
         if (d?.chat_details?.name) {
           asserts.observeChatDetails(d.chat_details.name);
         }
+      }
+
+      // Local Ability proxy: when --proxy-pi is set, mirror what the
+      // DevKit's node-server would do on receipt of this frame.
+      if (type === "devkit-capability" && opts.proxyPi) {
+        const frame = (data ?? {}) as {
+          capability_name?: string;
+          function_name?: string;
+          args?: unknown[];
+        };
+        log.push(
+          "proxy-pi",
+          `${frame.capability_name}.${frame.function_name}(${JSON.stringify(frame.args ?? [])})`,
+        );
+        handleDevkitCapability(frame, {
+          sshTarget: opts.proxyPi,
+          capDir: opts.proxyPiCapDir,
+        }).then((resultFrame) => {
+          log.push(
+            "proxy-pi",
+            `result success=${resultFrame.data.success} chars=${
+              (resultFrame.data.output ?? "").length
+            }`,
+          );
+          // The agent-socket.send wrapper takes (type, data); the cloud's
+          // ACK schema expects the WHOLE frame as the payload.
+          socket.send(resultFrame.type, resultFrame.data);
+        });
       }
 
       // Cloud agent log lines arrive as {type:"log", data:{l, m}} — our

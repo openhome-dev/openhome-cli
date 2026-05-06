@@ -387,6 +387,8 @@ openhome test "any new tickets" --expect-cap my-skill --expect-speak "Tickets:" 
 | `--log-file <path>` | Write the full frame stream here (default `/tmp/openhome-test.log`) |
 | `--quiet` | Only print PASS/FAIL line |
 | `--json` | Machine-readable JSON output |
+| `--proxy-pi <ssh-target>` | SSH `user@host` of your DevKit — required for end-to-end Local Ability tests (see below) |
+| `--proxy-pi-cap-dir <path>` | Override the DevKit's `local_capabilities` directory (default `/home/openhome/openhome_devkit/local_capabilities`) |
 
 **Exit codes:** `0` = all assertions met, `1` = one or more missed (or timeout), `2` = setup error (auth/regex/missing trigger).
 
@@ -409,6 +411,23 @@ openhome test "any new tickets" --expect-cap my-skill --expect-speak "Tickets:" 
 ```
 
 > **Note:** `test` opens a new voice-stream WebSocket to the same agent. If a hardware client (e.g. the OpenHome DevKit) is currently connected, the cloud will close that session — bring the hardware back online after iterating.
+
+#### Testing Local Abilities (`--proxy-pi`)
+
+Local Abilities (`category: local`) split execution between `main.py` (sandboxed) and `devkit_functions.py` (runs on the DevKit hardware). When `main.py` calls `send_devkit_capability_action()`, the cloud emits a `devkit-capability` frame and waits for a `devkit-capability-result` ACK from the device.
+
+The plain `openhome test` flow can't drive this round-trip on its own: opening a fresh voice-stream WS displaces the kiosk session, so the cloud routes the dispatch back to **us**, not the DevKit. The harness records the frame but has no way to invoke the function — the call times out at 8s with `output: null`.
+
+`--proxy-pi <user@host>` makes the harness mirror what the DevKit's node-server does on receipt of the frame: SSH-exec `sudo python3 .../<capability_name>/devkit_functions.py <function_name> <args>` on the DevKit and reply with `devkit-capability-result`. The cloud sees a normal device round-trip; `main.py`'s `await send_devkit_capability_action(...)` resolves with the function's stdout.
+
+```bash
+openhome test "ticket pulse" \
+  --proxy-pi openhome@192.168.1.42 \
+  --expect-cap mylocalability \
+  --expect-speak "Tickets:"
+```
+
+Requirements: passwordless SSH access to the DevKit (key-based auth — the harness runs `ssh -o BatchMode=yes`), and the ability synced to the DevKit (Live Editor → Advanced DevKit Controls → Sync Abilities, or manual SCP).
 
 ---
 

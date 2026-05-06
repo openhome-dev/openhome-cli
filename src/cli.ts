@@ -367,6 +367,18 @@ program
   .option("--log-file <path>", "Frame log destination (default /tmp/openhome-test.log)")
   .option("--quiet", "Only print PASS/FAIL line")
   .option("--json", "Output machine-readable JSON")
+  .option(
+    "--proxy-pi <ssh-target>",
+    "SSH user@host of your DevKit. Required for end-to-end tests of " +
+      "Local Abilities — opening a fresh voice-stream WS displaces the " +
+      "kiosk session, so the cloud routes devkit-capability dispatches " +
+      "back to us; this flag exec-proxies them to your Pi via SSH.",
+  )
+  .option(
+    "--proxy-pi-cap-dir <path>",
+    "Override the DevKit's local_capabilities directory " +
+      "(default /home/openhome/openhome_devkit/local_capabilities)",
+  )
   .action(
     async (
       trigger: string | undefined,
@@ -381,6 +393,8 @@ program
         logFile?: string;
         quiet?: boolean;
         json?: boolean;
+        proxyPi?: string;
+        proxyPiCapDir?: string;
       },
     ) => {
       await testCommand(trigger, opts);
