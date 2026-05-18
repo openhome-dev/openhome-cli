@@ -52,6 +52,14 @@ const SSH_CONNECT_TIMEOUT_S = 5;
 const DEFAULT_CAP_DIR = "/home/openhome/openhome_devkit/local_capabilities";
 
 /**
+ * Allowlist for capability_name and function_name. These arrive from the
+ * OpenHome cloud WebSocket and are embedded in a remote `sudo python3 ...`
+ * invocation, so they must be tightly constrained. POSIX-portable identifier
+ * pattern: alphanumeric plus underscore and hyphen.
+ */
+export const SAFE_IDENT = /^[a-zA-Z0-9_-]+$/;
+
+/**
  * POSIX shell-escape a string. Wraps in single quotes and escapes any
  * embedded single quotes via `'\\''`. Safe for use inside a remote
  * `sudo python3 ...` invocation.
@@ -65,6 +73,10 @@ export function shq(s: string): string {
 /**
  * Build the remote command the proxy will run for a given dispatch.
  * Pure — used by both the runtime and the unit tests.
+ *
+ * Callers MUST validate capabilityName and functionName against SAFE_IDENT
+ * before reaching this function (handleDevkitCapability does so). We still
+ * defence-in-depth `shq()` every interpolated value here.
  */
 export function buildRemoteCommand(
   capabilityName: string,
@@ -74,7 +86,7 @@ export function buildRemoteCommand(
 ): string {
   const script = `${capDir}/${capabilityName}/devkit_functions.py`;
   const argsShell = args.map((a) => shq(String(a))).join(" ");
-  return `sudo python3 ${script} ${shq(functionName)}${argsShell ? " " + argsShell : ""}`.trim();
+  return `sudo python3 ${shq(script)} ${shq(functionName)}${argsShell ? " " + argsShell : ""}`.trim();
 }
 
 /**
@@ -89,6 +101,7 @@ export function sshExec(
     const child = spawn("ssh", [
       "-o", "BatchMode=yes",
       "-o", `ConnectTimeout=${SSH_CONNECT_TIMEOUT_S}`,
+      "--", // prevent SSH option-injection from target values starting with `-`
       target,
       command,
     ]);
@@ -158,6 +171,24 @@ export async function handleDevkitCapability(
         success: false,
         output: null,
         error: "capability_name and function_name are required",
+      },
+    };
+  }
+  // STRICT ALLOWLIST: capability_name and function_name arrive from the
+  // OpenHome cloud WebSocket and are embedded in a remote sudo shell
+  // invocation. Block anything outside [a-zA-Z0-9_-] before it gets near
+  // buildRemoteCommand — prevents shell injection AND path traversal
+  // (e.g. capability_name "../../../tmp/evil").
+  if (!SAFE_IDENT.test(cap) || !SAFE_IDENT.test(fn)) {
+    return {
+      type: "devkit-capability-result",
+      data: {
+        capability_name: cap,
+        function_name: fn,
+        args: Array.isArray(frame.args) ? frame.args : [],
+        success: false,
+        output: null,
+        error: "capability_name and function_name must match [a-zA-Z0-9_-]+",
       },
     };
   }

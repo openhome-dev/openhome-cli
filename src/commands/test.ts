@@ -210,6 +210,23 @@ export async function testCommand(
       // Final assistant speech feeds expect-speak / reject-speak.
       if (role === "assistant" && final && content) {
         asserts.observeAssistantSpeak(content);
+        // Fast-settle on a reject-speak hit. Without this, done() returns
+        // false permanently when a rejection fires (asserts deliberately
+        // never marks itself "done" on rejection) and the run idles until
+        // timeout — the JSON output then reports reason: "timeout" instead
+        // of the actual rejected content.
+        if (asserts.rejected()) {
+          const hit =
+            asserts
+              .toRecords()
+              .find((r) => r.kind === "reject" && r.hit)?.hit ?? "";
+          settle({
+            pass: false,
+            reason: `rejected-speak: ${hit.slice(0, 120)}`,
+          });
+          socket.close();
+          return;
+        }
       }
     },
 
@@ -243,17 +260,28 @@ export async function testCommand(
         handleDevkitCapability(frame, {
           sshTarget: opts.proxyPi,
           capDir: opts.proxyPiCapDir,
-        }).then((resultFrame) => {
-          log.push(
-            "proxy-pi",
-            `result success=${resultFrame.data.success} chars=${
-              (resultFrame.data.output ?? "").length
-            }`,
-          );
-          // The agent-socket.send wrapper takes (type, data); the cloud's
-          // ACK schema expects the WHOLE frame as the payload.
-          socket.send(resultFrame.type, resultFrame.data);
-        });
+        })
+          .then((resultFrame) => {
+            log.push(
+              "proxy-pi",
+              `result success=${resultFrame.data.success} chars=${
+                (resultFrame.data.output ?? "").length
+              }`,
+            );
+            // The agent-socket.send wrapper takes (type, data); the cloud's
+            // ACK schema expects the WHOLE frame as the payload.
+            socket.send(resultFrame.type, resultFrame.data);
+          })
+          .catch((err: unknown) => {
+            // Without an explicit .catch() here, any throw inside
+            // handleDevkitCapability or buildRemoteCommand becomes an
+            // unhandled rejection — Node 15+ terminates the process with
+            // no log file written and no JSON output for CI consumers.
+            const msg = err instanceof Error ? err.message : String(err);
+            log.push("proxy-pi-error", msg);
+            settle({ pass: false, reason: `devkit proxy error: ${msg}` });
+            socket.close();
+          });
       }
 
       // Cloud agent log lines arrive as {type:"log", data:{l, m}} — our
