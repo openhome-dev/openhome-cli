@@ -19,6 +19,7 @@ import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
 import { validateCommand } from "./commands/validate.js";
+import { testCommand, collect } from "./commands/test.js";
 import { p, handleCancel } from "./ui/format.js";
 import { getConfig, saveConfig, getJwt, getJwtStatus } from "./config/store.js";
 import chalk from "chalk";
@@ -336,6 +337,71 @@ program
   });
 
 program
+  .command("test [trigger]")
+  .description("Send a trigger and assert on the resulting frame stream")
+  .option("--trigger <phrase>", "Trigger phrase (alternative to positional arg)")
+  .option("--agent <id>", "Agent ID (uses default if not set)")
+  .option(
+    "--expect-cap <name>",
+    "Fail unless chat_details routes to this capability unique_name",
+  )
+  .option(
+    "--expect-log <regex>",
+    "Fail unless an editor_logging_handler line matches (repeatable)",
+    collect,
+    [],
+  )
+  .option(
+    "--expect-speak <regex>",
+    "Fail unless a final assistant message matches (repeatable)",
+    collect,
+    [],
+  )
+  .option(
+    "--reject-speak <regex>",
+    "Fail if a final assistant message matches (repeatable)",
+    collect,
+    [],
+  )
+  .option("--timeout <ms>", "Overall timeout in milliseconds", "60000")
+  .option("--log-file <path>", "Frame log destination (default /tmp/openhome-test.log)")
+  .option("--quiet", "Only print PASS/FAIL line")
+  .option("--json", "Output machine-readable JSON")
+  .option(
+    "--proxy-pi <ssh-target>",
+    "SSH user@host of your DevKit. Required for end-to-end tests of " +
+      "Local Abilities — opening a fresh voice-stream WS displaces the " +
+      "kiosk session, so the cloud routes devkit-capability dispatches " +
+      "back to us; this flag exec-proxies them to your Pi via SSH.",
+  )
+  .option(
+    "--proxy-pi-cap-dir <path>",
+    "Override the DevKit's local_capabilities directory " +
+      "(default /home/openhome/openhome_devkit/local_capabilities)",
+  )
+  .action(
+    async (
+      trigger: string | undefined,
+      opts: {
+        trigger?: string;
+        agent?: string;
+        expectCap?: string;
+        expectLog?: string[];
+        expectSpeak?: string[];
+        rejectSpeak?: string[];
+        timeout?: string;
+        logFile?: string;
+        quiet?: boolean;
+        json?: boolean;
+        proxyPi?: string;
+        proxyPiCapDir?: string;
+      },
+    ) => {
+      await testCommand(trigger, opts);
+    },
+  );
+
+program
   .command("list")
   .description("List all deployed abilities")
   .option("--json", "Output machine-readable JSON")
@@ -588,6 +654,13 @@ chat     WebSocket chat with an agent  [API key only]
 
 trigger  Fire a trigger phrase remotely  [API key only]
   openhome trigger "phrase" --agent <agent_id>
+
+test     Send a trigger and assert on response frames  [API key only]
+  openhome test "any new tickets" --agent <agent_id> \\
+    --expect-cap my-skill --expect-log "STEP A0" --expect-speak "Tickets:" --json
+  → returns ok, pass, asserts (per-expectation met state), elapsed_ms
+  → exit 0 = all assertions met, 1 = at least one missed/timeout
+  → use this for fast iteration without voice/hardware
 
 logs     Stream live agent messages  [API key only]
   openhome logs [--agent <agent_id>]
