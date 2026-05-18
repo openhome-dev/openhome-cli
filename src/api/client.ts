@@ -267,6 +267,9 @@ export class ApiClient implements IApiClient {
     if (metadata.personality_id) {
       form.append("personality_id", metadata.personality_id);
     }
+    if (metadata.template !== undefined) {
+      form.append("template", String(metadata.template));
+    }
 
     const url = `${this.baseUrl}${ENDPOINTS.uploadCapability}`;
 
@@ -438,9 +441,7 @@ export class ApiClient implements IApiClient {
     // Uses multipart/form-data — JSON is rejected
     const form = new FormData();
     form.append("personality_id", personalityId);
-    for (const capId of capabilityIds) {
-      form.append("matching_capabilities", String(capId));
-    }
+    form.append("matching_capabilities", capabilityIds.join(","));
     return this.request<AssignCapabilitiesResponse>(
       ENDPOINTS.editPersonality,
       { method: "PUT", body: form },

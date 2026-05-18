@@ -302,6 +302,10 @@ program
   )
   .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client (no real network calls)")
+  .option(
+    "--template <id>",
+    "Template ID to associate with the ability (workaround for cloud router — see issue #14)",
+  )
   .action(
     async (
       path: string | undefined,
@@ -314,6 +318,7 @@ program
         triggers?: string;
         timeout?: string;
         json?: boolean;
+        template?: string;
       },
     ) => {
       await deployCommand(path, opts);

@@ -29,6 +29,7 @@ export interface UploadAbilityMetadata {
   category: AbilityCategory;
   matching_hotwords: string[];
   personality_id?: string;
+  template?: number;
 }
 
 export interface UploadAbilityResponse {
