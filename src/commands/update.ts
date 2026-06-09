@@ -1,7 +1,9 @@
 import { resolve, basename } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import archiver from "archiver";
+import { createWriteStream } from "node:fs";
 import { ApiClient } from "../api/client.js";
 import { getApiKey, getApiBase } from "../config/store.js";
 import {
@@ -14,38 +16,82 @@ import {
 } from "../ui/format.js";
 import chalk from "chalk";
 
-function expandPath(p: string): string {
-  if (p.startsWith("~/") || p === "~") return join(homedir(), p.slice(2));
-  return resolve(p);
+function expandPath(input: string): string {
+  if (input.startsWith("~/") || input === "~")
+    return join(homedir(), input.slice(2));
+  return resolve(input);
 }
 
-function scanForZips(
+function isAbilityDir(dir: string): boolean {
+  return existsSync(join(dir, "main.py"));
+}
+
+/** Scan for .zip files and ability directories (contain main.py). */
+function scanForSources(
   dir: string,
   depth = 0,
-): { path: string; label: string }[] {
-  const found: { path: string; label: string }[] = [];
+): { path: string; label: string; isDir: boolean }[] {
+  const found: { path: string; label: string; isDir: boolean }[] = [];
   if (!existsSync(dir)) return found;
   const home = homedir();
+  const shortDir = (d: string) =>
+    d.startsWith(home) ? `~${d.slice(home.length)}` : d;
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isFile() && entry.name.endsWith(".zip")) {
-        const shortDir = dir.startsWith(home)
-          ? `~${dir.slice(home.length)}`
-          : dir;
-        found.push({ path: full, label: `${entry.name}  (${shortDir})` });
-      } else if (
-        entry.isDirectory() &&
-        depth < 2 &&
-        !entry.name.startsWith(".")
-      ) {
-        found.push(...scanForZips(full, depth + 1));
+        found.push({
+          path: full,
+          label: `📦 ${entry.name}  (${shortDir(dir)})`,
+          isDir: false,
+        });
+      } else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        if (isAbilityDir(full)) {
+          found.push({
+            path: full,
+            label: `📁 ${entry.name}/  (${shortDir(dir)})`,
+            isDir: true,
+          });
+        } else if (depth < 2) {
+          found.push(...scanForSources(full, depth + 1));
+        }
       }
     }
   } catch {
     /* skip unreadable dirs */
   }
   return found;
+}
+
+/** Create a flat zip from a directory (files at root, no top-level folder). */
+function zipDirectory(dirPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const outPath = join(tmpdir(), `openhome-update-${Date.now()}.zip`);
+    const output = createWriteStream(outPath);
+    const archive = archiver("zip", { zlib: { level: 6 } });
+
+    output.on("close", () => {
+      try {
+        resolve(readFileSync(outPath));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    archive.on("error", reject);
+    archive.pipe(output);
+
+    // Add each file directly at root — no top-level directory
+    for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+      const full = join(dirPath, entry.name);
+      if (entry.isFile()) {
+        archive.file(full, { name: entry.name });
+      } else if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        archive.directory(full, entry.name);
+      }
+    }
+
+    archive.finalize();
+  });
 }
 
 export async function updateCommand(
@@ -125,34 +171,34 @@ export async function updateCommand(
       abilities.find((a) => a.ability_id === targetId)?.unique_name ?? targetId;
   }
 
-  // Resolve zip path
-  let zipPath: string;
+  // Resolve source (zip file or ability directory)
+  let sourcePath: string;
+  let sourceIsDir = false;
+
   if (opts.zip) {
-    zipPath = expandPath(opts.zip);
-    if (!existsSync(zipPath)) {
+    sourcePath = expandPath(opts.zip);
+    if (!existsSync(sourcePath)) {
       if (opts.json) jsonError("NOT_FOUND", `File not found: ${opts.zip}`);
       error(`File not found: ${opts.zip}`);
       process.exit(1);
     }
+    sourceIsDir = statSync(sourcePath).isDirectory();
   } else {
     const home = homedir();
-    const foundZips = [
+    const found = [
       process.cwd(),
       join(home, "Desktop"),
       join(home, "Downloads"),
       join(home, "Documents"),
-    ].flatMap((d) => scanForZips(d));
+    ]
+      .flatMap((d) => scanForSources(d))
+      .filter((z, i, arr) => arr.findIndex((x) => x.path === z.path) === i);
 
-    const seen = new Set<string>();
-    const uniqueZips = foundZips.filter(
-      (z) => !seen.has(z.path) && seen.add(z.path),
-    );
-
-    if (uniqueZips.length > 0) {
-      const selected = await p.select({
-        message: `Select new zip for "${targetName}"`,
+    if (found.length > 0) {
+      const sel = await p.select({
+        message: `Select source for "${targetName}"`,
         options: [
-          ...uniqueZips.map((z) => ({ value: z.path, label: z.label })),
+          ...found.map((z) => ({ value: z.path, label: z.label })),
           {
             value: "__custom__",
             label: "Other...",
@@ -160,39 +206,42 @@ export async function updateCommand(
           },
         ],
       });
-      handleCancel(selected);
-      if (selected === "__custom__") {
+      handleCancel(sel);
+      if (sel === "__custom__") {
         const input = await p.text({
-          message: "Path to zip file",
-          placeholder: "~/path/to/ability.zip",
+          message: "Path to zip file or ability directory",
+          placeholder: "~/Desktop/my-ability.zip",
           validate: (val) => {
             if (!val?.trim()) return "Path is required";
             if (!existsSync(expandPath(val.trim())))
-              return `File not found: ${val.trim()}`;
+              return `Not found: ${val.trim()}`;
           },
         });
         handleCancel(input);
-        zipPath = expandPath((input as string).trim());
+        sourcePath = expandPath((input as string).trim());
+        sourceIsDir = statSync(sourcePath).isDirectory();
       } else {
-        zipPath = selected as string;
+        sourcePath = sel as string;
+        sourceIsDir = found.find((z) => z.path === sourcePath)?.isDir ?? false;
       }
     } else {
       const input = await p.text({
-        message: `Path to new zip for "${targetName}"`,
+        message: `Path to zip or directory for "${targetName}"`,
         placeholder: "~/Desktop/my-ability.zip",
         validate: (val) => {
           if (!val?.trim()) return "Path is required";
           if (!existsSync(expandPath(val.trim())))
-            return `File not found: ${val.trim()}`;
+            return `Not found: ${val.trim()}`;
         },
       });
       handleCancel(input);
-      zipPath = expandPath((input as string).trim());
+      sourcePath = expandPath((input as string).trim());
+      sourceIsDir = statSync(sourcePath).isDirectory();
     }
   }
 
   const commitMessage =
-    opts.message ?? `Updated via openhome CLI — ${basename(zipPath)}`;
+    opts.message ?? `Updated via openhome CLI — ${basename(sourcePath)}`;
 
   // Get the release_id for this ability
   s?.start("Resolving release...");
@@ -203,7 +252,7 @@ export async function updateCommand(
       installed.release_id ?? (installed.id ? String(installed.id) : undefined);
     if (!rid) {
       throw new Error(
-        "No release_id in server response — ability may not be installed on an agent yet.",
+        "No release_id found — ability may not be installed on an agent yet.",
       );
     }
     releaseId = rid;
@@ -216,15 +265,29 @@ export async function updateCommand(
     process.exit(1);
   }
 
-  // Upload new zip
+  // Build zip buffer
   let zipBuffer: Buffer;
-  try {
-    zipBuffer = readFileSync(zipPath);
-  } catch (err) {
-    const msg = `Could not read zip: ${err instanceof Error ? err.message : String(err)}`;
-    if (opts.json) jsonError("READ_ERROR", msg);
-    error(msg);
-    process.exit(1);
+  if (sourceIsDir) {
+    s?.start(`Zipping ${basename(sourcePath)}/...`);
+    try {
+      zipBuffer = await zipDirectory(sourcePath);
+      s?.stop("Zipped.");
+    } catch (err) {
+      s?.stop("Zip failed.");
+      const msg = err instanceof Error ? err.message : String(err);
+      if (opts.json) jsonError("ZIP_ERROR", msg);
+      error(`Failed to zip directory: ${msg}`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      zipBuffer = readFileSync(sourcePath);
+    } catch (err) {
+      const msg = `Could not read zip: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.json) jsonError("READ_ERROR", msg);
+      error(msg);
+      process.exit(1);
+    }
   }
 
   s?.start(`Uploading new version of "${targetName}"...`);
@@ -251,7 +314,7 @@ export async function updateCommand(
         result.message ??
         `"${targetName}" updated successfully.`,
     );
-    p.outro("Done. Your ability is running the new code.");
+    p.outro("Done. Your ability is running the new code. 🎱");
   } catch (err) {
     s?.stop("Update failed.");
     const msg = err instanceof Error ? err.message : String(err);
