@@ -172,6 +172,38 @@ export async function assignCommand(
   s?.start(`Assigning ${chosenIds.length} ability(s) to "${agentName}"...`);
   try {
     const result = await client.assignCapabilities(agentId, capabilityIds);
+
+    // Enable agent_capability for all assigned skill abilities so keyword
+    // routing works — new installs default to system_capability only
+    try {
+      const installed = await client.getInstalledCapabilities();
+      const skillIds = new Set(
+        abilities
+          .filter(
+            (a) =>
+              chosenIds.includes(a.ability_id) &&
+              (a as { category?: string }).category !== "background_daemon" &&
+              (a as { category?: string }).category !== "local",
+          )
+          .map((a) => a.ability_id),
+      );
+      for (const cap of installed) {
+        const match = abilities.find(
+          (a) => a.unique_name === cap.name && skillIds.has(a.ability_id),
+        );
+        if (match && !cap.agent_capability) {
+          await client.enableAgentCapability(
+            cap.id,
+            cap.name,
+            cap.category,
+            cap.trigger_words,
+          );
+        }
+      }
+    } catch {
+      // Non-fatal — assign succeeded, agent_capability toggle is best-effort
+    }
+
     s?.stop("Done.");
 
     if (opts.json) {

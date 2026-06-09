@@ -3,9 +3,11 @@ import { ApiClient } from "../api/client.js";
 import { error, success, info, p, handleCancel } from "../ui/format.js";
 import { createAgentSocket } from "../ws/agent-socket.js";
 import chalk from "chalk";
+import WebSocket from "ws";
+import * as readline from "node:readline";
 
 export async function logsCommand(
-  opts: { agent?: string } = {},
+  opts: { agent?: string; callLogs?: boolean } = {},
 ): Promise<void> {
   p.intro("📡 Stream agent logs");
 
@@ -49,8 +51,80 @@ export async function logsCommand(
     }
   }
 
-  info(`Streaming logs from agent ${chalk.bold(agentId)}...`);
-  info(`Press ${chalk.bold("Ctrl+C")} to stop.\n`);
+  info(`Press ${chalk.bold("Ctrl+C")} or ${chalk.bold("Esc")} to stop.\n`);
+
+  // ESC key exits
+  readline.emitKeypressEvents(process.stdin);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  }
+
+  function cleanup() {
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stdin.removeAllListeners("keypress");
+  }
+
+  if (opts.callLogs) {
+    // Call-level logs via dedicated WebSocket
+    const base =
+      getApiBase()?.replace("https://", "wss://").replace("http://", "ws://") ??
+      "wss://app.openhome.com";
+    const url = `${base}/websocket/logs?api_key=${apiKey}&tail=100`;
+    info(`Streaming call logs...`);
+
+    const ws = new WebSocket(url, {
+      headers: {
+        Origin: "https://app.openhome.com",
+        "User-Agent": "openhome-cli",
+      },
+    });
+
+    const done = new Promise<void>((resolve) => {
+      ws.on("open", () => success("Connected to call logs. Waiting...\n"));
+      ws.on("message", (raw) => {
+        const ts = chalk.gray(new Date().toLocaleTimeString());
+        try {
+          const msg = JSON.parse(raw.toString());
+          const role =
+            msg.role === "assistant"
+              ? chalk.cyan("AGENT")
+              : chalk.green("USER");
+          if (msg.content) console.log(`${ts} [${role}] ${msg.content}`);
+          else console.log(`${ts} ${chalk.gray(JSON.stringify(msg))}`);
+        } catch {
+          console.log(`${ts} ${raw.toString()}`);
+        }
+      });
+      ws.on("error", (err) => error(`WebSocket error: ${err.message}`));
+      ws.on("close", (code) => {
+        console.log("");
+        info(`Disconnected (${code})`);
+        resolve();
+      });
+    });
+
+    const exitHandler = (_str: string, key: { name: string }) => {
+      if (key?.name === "escape") {
+        ws.close();
+        cleanup();
+      }
+    };
+    process.stdin.on("keypress", exitHandler);
+    process.on("SIGINT", () => {
+      console.log("");
+      info("Stopping...");
+      ws.close();
+      cleanup();
+    });
+
+    await done;
+    cleanup();
+    return;
+  }
+
+  // Default: real-time agent message stream
+  info(`Streaming messages from agent ${chalk.bold(agentId)}...`);
 
   const socket = createAgentSocket({
     apiKey,
@@ -113,18 +187,27 @@ export async function logsCommand(
     onError(err) {
       error(`WebSocket error: ${err.message}`);
     },
-
     onClose(code) {
       console.log("");
       info(`Connection closed (code: ${code})`);
     },
   });
 
+  const exitHandler = (_str: string, key: { name: string }) => {
+    if (key?.name === "escape") {
+      info("Stopping log stream...");
+      socket.close();
+      cleanup();
+    }
+  };
+  process.stdin.on("keypress", exitHandler);
   process.on("SIGINT", () => {
     console.log("");
     info("Stopping log stream...");
     socket.close();
+    cleanup();
   });
 
   await socket.done;
+  cleanup();
 }

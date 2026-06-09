@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { loginCommand } from "./commands/login.js";
 import { deployCommand } from "./commands/deploy.js";
-import { deleteCommand } from "./commands/delete.js";
+import { updateCommand } from "./commands/update.js";
 import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
@@ -19,6 +19,7 @@ import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
 import { validateCommand } from "./commands/validate.js";
+import { localCommand } from "./commands/local.js";
 import { p, handleCancel } from "./ui/format.js";
 import { getConfig, saveConfig, getJwt, getJwtStatus } from "./config/store.js";
 import chalk from "chalk";
@@ -178,9 +179,9 @@ async function interactiveMenu(): Promise<void> {
           hint: "List deployed abilities",
         },
         {
-          value: "delete",
-          label: "🗑️   Delete Ability",
-          hint: "Remove a deployed ability",
+          value: "update",
+          label: "🔄  Update Ability",
+          hint: "Upload a new version of an existing ability",
         },
         {
           value: "assign",
@@ -212,6 +213,11 @@ async function interactiveMenu(): Promise<void> {
           label: "🔓  Log Out",
           hint: "Clear credentials and re-authenticate",
         },
+        {
+          value: "local",
+          label: "🔌  Local Link",
+          hint: "Run abilities that control your local machine",
+        },
         { value: "exit", label: "👋  Exit", hint: "Quit" },
       ],
     });
@@ -224,8 +230,8 @@ async function interactiveMenu(): Promise<void> {
       case "list":
         await listCommand();
         break;
-      case "delete":
-        await deleteCommand();
+      case "update":
+        await updateCommand();
         break;
       case "assign":
         await assignCommand();
@@ -246,6 +252,35 @@ async function interactiveMenu(): Promise<void> {
         await logoutCommand();
         await ensureLoggedIn();
         break;
+      case "local": {
+        const { getPidForMenu } = await import("./commands/local.js");
+        const isRunning = getPidForMenu() !== null;
+        p.note(
+          [
+            "Local Link lets abilities run terminal commands on your machine.",
+            "Voice commands like 'check disk space' or 'open Chrome' execute locally.",
+            "",
+            `Status: ${isRunning ? chalk.green("● Running") : chalk.gray("○ Stopped")}`,
+          ].join("\n"),
+          "🔌 Local Link",
+        );
+        const action = await p.select({
+          message: "What would you like to do?",
+          options: isRunning
+            ? [
+                { value: "stop", label: "Stop local client" },
+                { value: "back", label: "Back" },
+              ]
+            : [
+                { value: "start", label: "Start local client" },
+                { value: "back", label: "Back" },
+              ],
+        });
+        handleCancel(action);
+        if (action === "start") await localCommand("start");
+        if (action === "stop") await localCommand("stop");
+        break;
+      }
       case "exit":
         running = false;
         break;
@@ -302,6 +337,10 @@ program
   )
   .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client (no real network calls)")
+  .option(
+    "--template <id>",
+    "Template ID to associate with the ability (workaround for cloud router — see issue #14)",
+  )
   .action(
     async (
       path: string | undefined,
@@ -314,6 +353,7 @@ program
         triggers?: string;
         timeout?: string;
         json?: boolean;
+        template?: string;
       },
     ) => {
       await deployCommand(path, opts);
@@ -345,19 +385,26 @@ program
   });
 
 program
-  .command("delete [ability]")
-  .description("Delete a deployed ability")
-  .option("--yes", "Skip confirmation prompt")
+  .command("update [ability]")
+  .description("Upload a new zip to an existing ability (version update)")
+  .option("--zip <path>", "Path to new zip file or ability directory")
+  .option("--message <msg>", "Commit message for this version")
   .option("--json", "Output machine-readable JSON")
-  .option("--mock", "Use mock API client")
   .action(
     async (
       ability: string | undefined,
-      opts: { mock?: boolean; yes?: boolean; json?: boolean },
+      opts: { zip?: string; message?: string; json?: boolean },
     ) => {
-      await deleteCommand(ability, opts);
+      await updateCommand(ability, opts);
     },
   );
+
+program
+  .command("local <subcommand>")
+  .description("Manage the local ability client (start | stop | status)")
+  .action(async (sub: string) => {
+    await localCommand(sub);
+  });
 
 program
   .command("assign")
@@ -429,7 +476,8 @@ program
   .command("logs")
   .description("Stream live agent messages and logs")
   .option("--agent <id>", "Agent ID (uses default if not set)")
-  .action(async (opts: { agent?: string }) => {
+  .option("--call-logs", "Stream call-level logs via dedicated WebSocket")
+  .action(async (opts: { agent?: string; callLogs?: boolean }) => {
     await logsCommand(opts);
   });
 

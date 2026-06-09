@@ -267,6 +267,9 @@ export class ApiClient implements IApiClient {
     if (metadata.personality_id) {
       form.append("personality_id", metadata.personality_id);
     }
+    if (metadata.template !== undefined) {
+      form.append("template", String(metadata.template));
+    }
 
     const url = `${this.baseUrl}${ENDPOINTS.uploadCapability}`;
 
@@ -339,11 +342,10 @@ export class ApiClient implements IApiClient {
   }
 
   async listAbilities(): Promise<ListAbilitiesResponse> {
-    // get-all-capabilities returns user-created abilities, JWT auth
     const data = await this.request<UserCapability[]>(
       ENDPOINTS.listCapabilities,
       { method: "GET" },
-      "jwt",
+      "xapikey",
     );
     return {
       abilities: data.map((c) => ({
@@ -351,6 +353,9 @@ export class ApiClient implements IApiClient {
         unique_name: c.name,
         display_name: c.name,
         version: c.capability_versions?.length ?? 1,
+        release_id: c.capability_versions?.[0]?.id
+          ? String(c.capability_versions[0].id)
+          : undefined,
         status: c.is_installed ? "active" : "processing",
         personality_ids: [],
         created_at: c.last_updated ?? new Date().toISOString(),
@@ -382,7 +387,6 @@ export class ApiClient implements IApiClient {
   }
 
   async deleteCapability(id: string): Promise<DeleteCapabilityResponse> {
-    // Try user-capability delete (JWT) first, fall back to uninstall for system abilities
     try {
       return await this.request<DeleteCapabilityResponse>(
         ENDPOINTS.deleteCapability(id),
@@ -390,9 +394,12 @@ export class ApiClient implements IApiClient {
         "jwt",
       );
     } catch (err) {
+      // Fall back to uninstall if primary delete endpoint is missing or returns
+      // "Invalid user Ability" (system abilities use a different path)
       if (
-        err instanceof ApiError &&
-        err.message.includes("Invalid user Ability")
+        err instanceof NotImplementedError ||
+        (err instanceof ApiError &&
+          err.message.includes("Invalid user Ability"))
       ) {
         return this.request<DeleteCapabilityResponse>(
           ENDPOINTS.uninstallCapability(id),
@@ -431,21 +438,105 @@ export class ApiClient implements IApiClient {
     );
   }
 
+  async getInstalledCapabilities(): Promise<InstalledCapability[]> {
+    return this.request<InstalledCapability[]>(
+      ENDPOINTS.getInstalledCapabilities,
+      { method: "GET" },
+      "jwt",
+    );
+  }
+
+  async enableAgentCapability(
+    installedId: number,
+    name: string,
+    category: string,
+    triggerWords: string[],
+  ): Promise<void> {
+    await this.request(
+      ENDPOINTS.editInstalledCapability(String(installedId)),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: true,
+          agent_capability: true,
+          name,
+          category,
+          trigger_words: triggerWords,
+        }),
+      },
+      "jwt",
+    );
+  }
+
   async assignCapabilities(
     personalityId: string,
     capabilityIds: number[],
   ): Promise<AssignCapabilitiesResponse> {
     // Uses multipart/form-data — JSON is rejected
+    // Each capability ID must be a separate form field (server expects number[])
     const form = new FormData();
     form.append("personality_id", personalityId);
-    for (const capId of capabilityIds) {
-      form.append("matching_capabilities", String(capId));
+    for (const id of capabilityIds) {
+      form.append("matching_capabilities", String(id));
     }
     return this.request<AssignCapabilitiesResponse>(
       ENDPOINTS.editPersonality,
       { method: "PUT", body: form },
       "xapikey",
     );
+  }
+
+  async getInstalledCapabilityByCapability(
+    capabilityId: string,
+  ): Promise<{ release_id?: string; id?: number; [key: string]: unknown }> {
+    return this.request(
+      ENDPOINTS.getInstalledCapabilityByCapability(capabilityId),
+      { method: "GET" },
+      "xapikey",
+    );
+  }
+
+  async updateAbilityCode(
+    releaseId: string,
+    zipBuffer: Buffer,
+    commitMessage = "Updated via openhome CLI",
+  ): Promise<{ detail?: string; message?: string }> {
+    const form = new FormDataLib();
+    form.append("zip_file", zipBuffer, {
+      filename: "ability.zip",
+      contentType: "application/zip",
+    });
+    form.append("committed", "true");
+    form.append("commit_message", commitMessage);
+    const url = `${this.baseUrl}${ENDPOINTS.validateReleaseCode(releaseId)}`;
+    if (process.env.OPENHOME_DEBUG) {
+      console.error(`[debug] POST ${url}`);
+      console.error(
+        `[debug] release_id=${releaseId} zip_bytes=${zipBuffer.length}`,
+      );
+    }
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "X-API-KEY": this.apiKey,
+        ...form.getHeaders(),
+      },
+      body: form.getBuffer() as unknown as BodyInit,
+    }).then(async (res) => {
+      const body = await res.json().catch(() => ({}));
+      if (process.env.OPENHOME_DEBUG) {
+        console.error(
+          `[debug] status=${res.status} body=${JSON.stringify(body)}`,
+        );
+      }
+      if (!res.ok)
+        throw new ApiError(
+          String(res.status),
+          (body as { detail?: string }).detail ?? res.statusText,
+        );
+      return body as { detail?: string; message?: string };
+    });
   }
 
   async updatePersonality(

@@ -59,6 +59,7 @@ export async function deployCommand(
     triggers?: string;
     json?: boolean;
     timeout?: string; // seconds as string from commander
+    template?: string;
   } = {},
 ): Promise<void> {
   if (!opts.json) p.intro("🚀 Upload Ability");
@@ -146,8 +147,6 @@ export async function deployCommand(
       placeholder: defaultName,
       validate: (val) => {
         if (!val?.trim()) return "Name is required";
-        if (!/^[a-z0-9-]+$/.test(val.trim()))
-          return "Lowercase letters, numbers, hyphens only";
       },
     });
     handleCancel(nameInput);
@@ -216,7 +215,21 @@ export async function deployCommand(
       .filter(Boolean);
   }
 
+  const needsApiKeys = await p.confirm({
+    message: "Does this ability require third party API keys?",
+    initialValue: false,
+  });
+  handleCancel(needsApiKeys);
+  if (needsApiKeys) {
+    p.note(
+      "After deploying, go to your ability settings in the dashboard to add API keys.",
+      "Third Party API Keys",
+    );
+  }
+
   const personalityId = opts.personality ?? getConfig().default_personality_id;
+
+  const templateId = opts.template ? parseInt(opts.template, 10) : undefined;
 
   const metadata: UploadAbilityMetadata = {
     name,
@@ -224,6 +237,9 @@ export async function deployCommand(
     category,
     matching_hotwords: hotwords,
     personality_id: personalityId,
+    ...(templateId !== undefined && !Number.isNaN(templateId)
+      ? { template: templateId }
+      : {}),
   };
 
   let zipBuffer: Buffer;
