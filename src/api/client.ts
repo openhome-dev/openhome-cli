@@ -476,7 +476,7 @@ export class ApiClient implements IApiClient {
       filename: "ability.zip",
       contentType: "application/zip",
     });
-    form.append("committed", "false");
+    form.append("committed", "true");
     form.append("commit_message", commitMessage);
     const url = `${this.baseUrl}${ENDPOINTS.validateReleaseCode(releaseId)}`;
     if (process.env.OPENHOME_DEBUG) {
