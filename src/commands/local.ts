@@ -74,16 +74,23 @@ export async function localCommand(
         return;
       }
 
-      // Patch API key into the client file
+      // Scrub any API key previously written into local_client.py by older
+      // CLI versions. Older versions patched the key as a Python string
+      // literal on disk — replace it with a placeholder if found.
       try {
-        let src = readFileSync(CLIENT_PATH, "utf8");
-        const patched = src.replace(
-          /OPENHOME_API_KEY\s*=\s*["'][^"']*["']/,
-          `OPENHOME_API_KEY = "${apiKey}"`,
+        const src = readFileSync(CLIENT_PATH, "utf8");
+        const scrubbed = src.replace(
+          /OPENHOME_API_KEY\s*=\s*["'][^"']+["']/,
+          'OPENHOME_API_KEY = os.environ.get("OPENHOME_API_KEY", "")',
         );
-        if (patched !== src) writeFileSync(CLIENT_PATH, patched);
+        if (scrubbed !== src) {
+          writeFileSync(CLIENT_PATH, scrubbed);
+          info(
+            "Scrubbed legacy API key from local_client.py (now read from env).",
+          );
+        }
       } catch {
-        // Non-fatal — proceed and let python report any auth error
+        // Non-fatal — proceed; key is passed via env regardless.
       }
 
       // Verify python3 is available
@@ -96,9 +103,12 @@ export async function localCommand(
 
       s.start("Starting local client...");
       const log = openSync(LOG_PATH, "a");
+      // Pass the API key via environment variable, never written to disk.
+      // local_client.py must read os.environ["OPENHOME_API_KEY"].
       const child = spawn("python3", [CLIENT_PATH], {
         detached: true,
         stdio: ["ignore", log, log],
+        env: { ...process.env, OPENHOME_API_KEY: apiKey },
       });
       child.unref();
       writeFileSync(PID_PATH, String(child.pid));
