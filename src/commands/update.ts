@@ -1,5 +1,5 @@
 import { resolve, basename } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "../api/client.js";
@@ -17,6 +17,35 @@ import chalk from "chalk";
 function expandPath(p: string): string {
   if (p.startsWith("~/") || p === "~") return join(homedir(), p.slice(2));
   return resolve(p);
+}
+
+function scanForZips(
+  dir: string,
+  depth = 0,
+): { path: string; label: string }[] {
+  const found: { path: string; label: string }[] = [];
+  if (!existsSync(dir)) return found;
+  const home = homedir();
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isFile() && entry.name.endsWith(".zip")) {
+        const shortDir = dir.startsWith(home)
+          ? `~${dir.slice(home.length)}`
+          : dir;
+        found.push({ path: full, label: `${entry.name}  (${shortDir})` });
+      } else if (
+        entry.isDirectory() &&
+        depth < 2 &&
+        !entry.name.startsWith(".")
+      ) {
+        found.push(...scanForZips(full, depth + 1));
+      }
+    }
+  } catch {
+    /* skip unreadable dirs */
+  }
+  return found;
 }
 
 export async function updateCommand(
@@ -106,17 +135,60 @@ export async function updateCommand(
       process.exit(1);
     }
   } else {
-    const input = await p.text({
-      message: `Path to new zip for "${targetName}"`,
-      placeholder: "~/Desktop/my-ability.zip",
-      validate: (val) => {
-        if (!val?.trim()) return "Path is required";
-        if (!existsSync(expandPath(val.trim())))
-          return `File not found: ${val.trim()}`;
-      },
-    });
-    handleCancel(input);
-    zipPath = expandPath((input as string).trim());
+    const home = homedir();
+    const foundZips = [
+      process.cwd(),
+      join(home, "Desktop"),
+      join(home, "Downloads"),
+      join(home, "Documents"),
+    ].flatMap((d) => scanForZips(d));
+
+    const seen = new Set<string>();
+    const uniqueZips = foundZips.filter(
+      (z) => !seen.has(z.path) && seen.add(z.path),
+    );
+
+    if (uniqueZips.length > 0) {
+      const selected = await p.select({
+        message: `Select new zip for "${targetName}"`,
+        options: [
+          ...uniqueZips.map((z) => ({ value: z.path, label: z.label })),
+          {
+            value: "__custom__",
+            label: "Other...",
+            hint: "Enter a path manually",
+          },
+        ],
+      });
+      handleCancel(selected);
+      if (selected === "__custom__") {
+        const input = await p.text({
+          message: "Path to zip file",
+          placeholder: "~/path/to/ability.zip",
+          validate: (val) => {
+            if (!val?.trim()) return "Path is required";
+            if (!existsSync(expandPath(val.trim())))
+              return `File not found: ${val.trim()}`;
+          },
+        });
+        handleCancel(input);
+        zipPath = expandPath((input as string).trim());
+      } else {
+        zipPath = selected as string;
+      }
+    } else {
+      const input = await p.text({
+        message: `Path to new zip for "${targetName}"`,
+        placeholder: "~/Desktop/my-ability.zip",
+        validate: (val) => {
+          if (!val?.trim()) return "Path is required";
+          if (!existsSync(expandPath(val.trim())))
+            return `File not found: ${val.trim()}`;
+        },
+      });
+      handleCancel(input);
+      zipPath = expandPath((input as string).trim());
+    }
   }
 
   const commitMessage =
