@@ -19,6 +19,7 @@ import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
 import { validateCommand } from "./commands/validate.js";
+import { localCommand } from "./commands/local.js";
 import { p, handleCancel } from "./ui/format.js";
 import { getConfig, saveConfig, getJwt, getJwtStatus } from "./config/store.js";
 import chalk from "chalk";
@@ -363,6 +364,13 @@ program
       await updateCommand(ability, opts);
     },
   );
+
+program
+  .command("local <subcommand>")
+  .description("Manage the local ability client (start | stop | status)")
+  .action(async (sub: string) => {
+    await localCommand(sub);
+  });
 
 program
   .command("assign")
