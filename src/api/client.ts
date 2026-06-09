@@ -385,7 +385,6 @@ export class ApiClient implements IApiClient {
   }
 
   async deleteCapability(id: string): Promise<DeleteCapabilityResponse> {
-    // Try user-capability delete (JWT) first, fall back to uninstall for system abilities
     try {
       return await this.request<DeleteCapabilityResponse>(
         ENDPOINTS.deleteCapability(id),
@@ -393,9 +392,12 @@ export class ApiClient implements IApiClient {
         "jwt",
       );
     } catch (err) {
+      // Fall back to uninstall if primary delete endpoint is missing or returns
+      // "Invalid user Ability" (system abilities use a different path)
       if (
-        err instanceof ApiError &&
-        err.message.includes("Invalid user Ability")
+        err instanceof NotImplementedError ||
+        (err instanceof ApiError &&
+          err.message.includes("Invalid user Ability"))
       ) {
         return this.request<DeleteCapabilityResponse>(
           ENDPOINTS.uninstallCapability(id),
@@ -450,6 +452,46 @@ export class ApiClient implements IApiClient {
       { method: "PUT", body: form },
       "xapikey",
     );
+  }
+
+  async getInstalledCapabilityByCapability(
+    capabilityId: string,
+  ): Promise<{ release_id?: string; id?: number; [key: string]: unknown }> {
+    return this.request(
+      ENDPOINTS.getInstalledCapabilityByCapability(capabilityId),
+      { method: "GET" },
+      "xapikey",
+    );
+  }
+
+  async updateAbilityCode(
+    releaseId: string,
+    zipBuffer: Buffer,
+    commitMessage = "Updated via openhome CLI",
+  ): Promise<{ detail?: string; message?: string }> {
+    const form = new FormDataLib();
+    form.append("zip_file", zipBuffer, {
+      filename: "ability.zip",
+      contentType: "application/zip",
+    });
+    form.append("committed", "false");
+    form.append("commit_message", commitMessage);
+    return fetch(`${this.baseUrl}${ENDPOINTS.validateReleaseCode(releaseId)}`, {
+      method: "POST",
+      headers: {
+        "X-API-KEY": this.apiKey,
+        ...form.getHeaders(),
+      },
+      body: form.getBuffer() as unknown as BodyInit,
+    }).then(async (res) => {
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new ApiError(
+          String(res.status),
+          (body as { detail?: string }).detail ?? res.statusText,
+        );
+      return body as { detail?: string; message?: string };
+    });
   }
 
   async updatePersonality(

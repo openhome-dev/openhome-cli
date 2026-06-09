@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { loginCommand } from "./commands/login.js";
 import { deployCommand } from "./commands/deploy.js";
-import { deleteCommand } from "./commands/delete.js";
+import { updateCommand } from "./commands/update.js";
 import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
@@ -178,9 +178,9 @@ async function interactiveMenu(): Promise<void> {
           hint: "List deployed abilities",
         },
         {
-          value: "delete",
-          label: "🗑️   Delete Ability",
-          hint: "Remove a deployed ability",
+          value: "update",
+          label: "🔄  Update Ability",
+          hint: "Upload a new version of an existing ability",
         },
         {
           value: "assign",
@@ -224,8 +224,8 @@ async function interactiveMenu(): Promise<void> {
       case "list":
         await listCommand();
         break;
-      case "delete":
-        await deleteCommand();
+      case "update":
+        await updateCommand();
         break;
       case "assign":
         await assignCommand();
@@ -350,17 +350,18 @@ program
   });
 
 program
-  .command("delete [ability]")
-  .description("Delete a deployed ability")
-  .option("--yes", "Skip confirmation prompt")
+  .command("update [ability]")
+  .description("Upload a new zip to an existing ability (version update)")
+  .argument("[ability]", "Ability ID or unique name to update")
+  .option("--zip <path>", "Path to new zip file")
+  .option("--message <msg>", "Commit message for this version")
   .option("--json", "Output machine-readable JSON")
-  .option("--mock", "Use mock API client")
   .action(
     async (
       ability: string | undefined,
-      opts: { mock?: boolean; yes?: boolean; json?: boolean },
+      opts: { zip?: string; message?: string; json?: boolean },
     ) => {
-      await deleteCommand(ability, opts);
+      await updateCommand(ability, opts);
     },
   );
 

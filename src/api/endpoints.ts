@@ -13,6 +13,10 @@ export const ENDPOINTS = {
   editInstalledCapability: (id: string) =>
     `/api/capabilities/edit-installed-capability/${id}/`,
   editPersonality: "/api/personalities/edit-personality/",
+  getInstalledCapabilityByCapability: (capabilityId: string) =>
+    `/api/capabilities/get/installed-capability/by-capability/${capabilityId}/`,
+  validateReleaseCode: (releaseId: string) =>
+    `/api/capabilities/validate/release-code/${releaseId}/`,
   voiceStream: (apiKey: string, agentId: string) =>
     `/websocket/voice-stream/${apiKey}/${agentId}`,
 } as const;
