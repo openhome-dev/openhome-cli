@@ -55,7 +55,10 @@ export async function logsCommand(
 
   // ESC key exits
   readline.emitKeypressEvents(process.stdin);
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  }
 
   function cleanup() {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
