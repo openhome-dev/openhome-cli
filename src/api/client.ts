@@ -342,11 +342,10 @@ export class ApiClient implements IApiClient {
   }
 
   async listAbilities(): Promise<ListAbilitiesResponse> {
-    // get-all-capabilities returns user-created abilities, JWT auth
     const data = await this.request<UserCapability[]>(
       ENDPOINTS.listCapabilities,
       { method: "GET" },
-      "jwt",
+      "xapikey",
     );
     return {
       abilities: data.map((c) => ({
