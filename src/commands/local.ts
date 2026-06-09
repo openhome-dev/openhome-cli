@@ -74,6 +74,18 @@ export async function localCommand(
         return;
       }
 
+      // Patch API key into the client file
+      try {
+        let src = readFileSync(CLIENT_PATH, "utf8");
+        const patched = src.replace(
+          /OPENHOME_API_KEY\s*=\s*["'][^"']*["']/,
+          `OPENHOME_API_KEY = "${apiKey}"`,
+        );
+        if (patched !== src) writeFileSync(CLIENT_PATH, patched);
+      } catch {
+        // Non-fatal — proceed and let python report any auth error
+      }
+
       // Verify python3 is available
       try {
         execFileSync("python3", ["--version"], { stdio: "ignore" });
