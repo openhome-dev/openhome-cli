@@ -147,8 +147,6 @@ export async function deployCommand(
       placeholder: defaultName,
       validate: (val) => {
         if (!val?.trim()) return "Name is required";
-        if (!/^[a-z0-9-]+$/.test(val.trim()))
-          return "Lowercase letters, numbers, hyphens only";
       },
     });
     handleCancel(nameInput);
