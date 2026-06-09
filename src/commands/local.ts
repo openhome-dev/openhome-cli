@@ -19,6 +19,10 @@ const LOG_PATH = join(LOCAL_DIR, "local_client.log");
 const CLIENT_URL =
   "https://raw.githubusercontent.com/openhome-dev/abilities/main/templates/Local/local_client.py";
 
+export function getPidForMenu(): number | null {
+  return getPid();
+}
+
 function getPid(): number | null {
   if (!existsSync(PID_PATH)) return null;
   const pid = parseInt(readFileSync(PID_PATH, "utf8").trim(), 10);

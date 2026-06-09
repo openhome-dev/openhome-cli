@@ -213,6 +213,11 @@ async function interactiveMenu(): Promise<void> {
           label: "🔓  Log Out",
           hint: "Clear credentials and re-authenticate",
         },
+        {
+          value: "local",
+          label: "🔌  Local Link",
+          hint: "Run abilities that control your local machine",
+        },
         { value: "exit", label: "👋  Exit", hint: "Quit" },
       ],
     });
@@ -247,6 +252,35 @@ async function interactiveMenu(): Promise<void> {
         await logoutCommand();
         await ensureLoggedIn();
         break;
+      case "local": {
+        const { getPidForMenu } = await import("./commands/local.js");
+        const isRunning = getPidForMenu() !== null;
+        p.note(
+          [
+            "Local Link lets abilities run terminal commands on your machine.",
+            "Voice commands like 'check disk space' or 'open Chrome' execute locally.",
+            "",
+            `Status: ${isRunning ? chalk.green("● Running") : chalk.gray("○ Stopped")}`,
+          ].join("\n"),
+          "🔌 Local Link",
+        );
+        const action = await p.select({
+          message: "What would you like to do?",
+          options: isRunning
+            ? [
+                { value: "stop", label: "Stop local client" },
+                { value: "back", label: "Back" },
+              ]
+            : [
+                { value: "start", label: "Start local client" },
+                { value: "back", label: "Back" },
+              ],
+        });
+        handleCancel(action);
+        if (action === "start") await localCommand("start");
+        if (action === "stop") await localCommand("stop");
+        break;
+      }
       case "exit":
         running = false;
         break;
