@@ -215,6 +215,18 @@ export async function deployCommand(
       .filter(Boolean);
   }
 
+  const needsApiKeys = await p.confirm({
+    message: "Does this ability require third party API keys?",
+    initialValue: false,
+  });
+  handleCancel(needsApiKeys);
+  if (needsApiKeys) {
+    p.note(
+      "After deploying, go to your ability settings in the dashboard to add API keys.",
+      "Third Party API Keys",
+    );
+  }
+
   const personalityId = opts.personality ?? getConfig().default_personality_id;
 
   const templateId = opts.template ? parseInt(opts.template, 10) : undefined;
