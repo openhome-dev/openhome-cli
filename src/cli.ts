@@ -352,8 +352,7 @@ program
 program
   .command("update [ability]")
   .description("Upload a new zip to an existing ability (version update)")
-  .argument("[ability]", "Ability ID or unique name to update")
-  .option("--zip <path>", "Path to new zip file")
+  .option("--zip <path>", "Path to new zip file or ability directory")
   .option("--message <msg>", "Commit message for this version")
   .option("--json", "Output machine-readable JSON")
   .action(

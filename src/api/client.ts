@@ -478,7 +478,14 @@ export class ApiClient implements IApiClient {
     });
     form.append("committed", "false");
     form.append("commit_message", commitMessage);
-    return fetch(`${this.baseUrl}${ENDPOINTS.validateReleaseCode(releaseId)}`, {
+    const url = `${this.baseUrl}${ENDPOINTS.validateReleaseCode(releaseId)}`;
+    if (process.env.OPENHOME_DEBUG) {
+      console.error(`[debug] POST ${url}`);
+      console.error(
+        `[debug] release_id=${releaseId} zip_bytes=${zipBuffer.length}`,
+      );
+    }
+    return fetch(url, {
       method: "POST",
       headers: {
         "X-API-KEY": this.apiKey,
@@ -487,6 +494,11 @@ export class ApiClient implements IApiClient {
       body: form.getBuffer() as unknown as BodyInit,
     }).then(async (res) => {
       const body = await res.json().catch(() => ({}));
+      if (process.env.OPENHOME_DEBUG) {
+        console.error(
+          `[debug] status=${res.status} body=${JSON.stringify(body)}`,
+        );
+      }
       if (!res.ok)
         throw new ApiError(
           String(res.status),
