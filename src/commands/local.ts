@@ -16,8 +16,8 @@ const LOCAL_DIR = join(homedir(), ".openhome", "local");
 const CLIENT_PATH = join(LOCAL_DIR, "local_client.py");
 const PID_PATH = join(LOCAL_DIR, "local_client.pid");
 const LOG_PATH = join(LOCAL_DIR, "local_client.log");
-const CLIENT_URL =
-  "https://raw.githubusercontent.com/openhome-dev/abilities/main/templates/Local/local_client.py";
+const CLIENT_DOWNLOAD_URL =
+  "https://drive.google.com/file/d/12Is4eXchH5dDjlG39Knp4oRuD-V3D-v_/view?usp=drive_link";
 
 export function getPidForMenu(): number | null {
   return getPid();
@@ -34,20 +34,6 @@ function getPid(): number | null {
   } catch {
     return null;
   }
-}
-
-async function downloadClient(apiKey: string): Promise<void> {
-  mkdirSync(LOCAL_DIR, { recursive: true });
-  const res = await fetch(CLIENT_URL);
-  if (!res.ok)
-    throw new Error(`Failed to download local client: ${res.status}`);
-  let src = await res.text();
-  // Inject API key
-  src = src.replace(
-    /OPENHOME_API_KEY\s*=\s*["'][^"']*["']/,
-    `OPENHOME_API_KEY = "${apiKey}"`,
-  );
-  writeFileSync(CLIENT_PATH, src, { mode: 0o755 });
 }
 
 export async function localCommand(
@@ -72,15 +58,20 @@ export async function localCommand(
       const s = p.spinner();
 
       if (!existsSync(CLIENT_PATH)) {
-        s.start("Downloading local client...");
-        try {
-          await downloadClient(apiKey);
-          s.stop("Downloaded.");
-        } catch (err) {
-          s.stop("Download failed.");
-          error(err instanceof Error ? err.message : String(err));
-          process.exit(1);
-        }
+        mkdirSync(LOCAL_DIR, { recursive: true });
+        p.note(
+          [
+            `Download local_client.py from:`,
+            chalk.cyan(CLIENT_DOWNLOAD_URL),
+            ``,
+            `Then save it to:`,
+            chalk.bold(CLIENT_PATH),
+            ``,
+            `Once saved, run ${chalk.bold("openhome local start")} again.`,
+          ].join("\n"),
+          "Setup Required",
+        );
+        return;
       }
 
       // Verify python3 is available
