@@ -439,9 +439,12 @@ export class ApiClient implements IApiClient {
     capabilityIds: number[],
   ): Promise<AssignCapabilitiesResponse> {
     // Uses multipart/form-data — JSON is rejected
+    // Each capability ID must be a separate form field (server expects number[])
     const form = new FormData();
     form.append("personality_id", personalityId);
-    form.append("matching_capabilities", capabilityIds.join(","));
+    for (const id of capabilityIds) {
+      form.append("matching_capabilities", String(id));
+    }
     return this.request<AssignCapabilitiesResponse>(
       ENDPOINTS.editPersonality,
       { method: "PUT", body: form },

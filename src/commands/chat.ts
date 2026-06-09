@@ -68,6 +68,17 @@ export async function chatCommand(
     output: process.stdout,
   });
 
+  // ESC key exits chat
+  readline.emitKeypressEvents(process.stdin, rl);
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  process.stdin.on("keypress", (_str, key) => {
+    if (key?.name === "escape") {
+      info("Closing connection...");
+      socket.close();
+      rl.close();
+    }
+  });
+
   const socket = createAgentSocket({
     apiKey,
     agentId,

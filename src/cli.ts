@@ -434,7 +434,8 @@ program
   .command("logs")
   .description("Stream live agent messages and logs")
   .option("--agent <id>", "Agent ID (uses default if not set)")
-  .action(async (opts: { agent?: string }) => {
+  .option("--call-logs", "Stream call-level logs via dedicated WebSocket")
+  .action(async (opts: { agent?: string; callLogs?: boolean }) => {
     await logsCommand(opts);
   });
 
