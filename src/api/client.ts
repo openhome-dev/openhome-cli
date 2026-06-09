@@ -438,6 +438,37 @@ export class ApiClient implements IApiClient {
     );
   }
 
+  async getInstalledCapabilities(): Promise<InstalledCapability[]> {
+    return this.request<InstalledCapability[]>(
+      ENDPOINTS.getInstalledCapabilities,
+      { method: "GET" },
+      "jwt",
+    );
+  }
+
+  async enableAgentCapability(
+    installedId: number,
+    name: string,
+    category: string,
+    triggerWords: string[],
+  ): Promise<void> {
+    await this.request(
+      ENDPOINTS.editInstalledCapability(String(installedId)),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: true,
+          agent_capability: true,
+          name,
+          category,
+          trigger_words: triggerWords,
+        }),
+      },
+      "jwt",
+    );
+  }
+
   async assignCapabilities(
     personalityId: string,
     capabilityIds: number[],

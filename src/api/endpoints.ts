@@ -13,6 +13,7 @@ export const ENDPOINTS = {
   editInstalledCapability: (id: string) =>
     `/api/capabilities/edit-installed-capability/${id}/`,
   editPersonality: "/api/personalities/edit-personality/",
+  getInstalledCapabilities: "/api/capabilities/get-installed-capabilities/",
   getInstalledCapabilityByCapability: (capabilityId: string) =>
     `/api/capabilities/get/installed-capability/by-capability/${capabilityId}/`,
   validateReleaseCode: (releaseId: string) =>
