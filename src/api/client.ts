@@ -353,6 +353,9 @@ export class ApiClient implements IApiClient {
         unique_name: c.name,
         display_name: c.name,
         version: c.capability_versions?.length ?? 1,
+        release_id: c.capability_versions?.[0]?.id
+          ? String(c.capability_versions[0].id)
+          : undefined,
         status: c.is_installed ? "active" : "processing",
         personality_ids: [],
         created_at: c.last_updated ?? new Date().toISOString(),

@@ -135,6 +135,7 @@ export async function updateCommand(
   // Resolve which ability to update
   let targetId: string;
   let targetName: string;
+  let targetReleaseId: string | undefined;
 
   if (abilityArg) {
     const match = abilities.find(
@@ -156,6 +157,7 @@ export async function updateCommand(
     }
     targetId = match.ability_id;
     targetName = match.unique_name;
+    targetReleaseId = match.release_id;
   } else {
     const selected = await p.select({
       message: "Which ability do you want to update?",
@@ -167,8 +169,9 @@ export async function updateCommand(
     });
     handleCancel(selected);
     targetId = selected as string;
-    targetName =
-      abilities.find((a) => a.ability_id === targetId)?.unique_name ?? targetId;
+    const found = abilities.find((a) => a.ability_id === targetId);
+    targetName = found?.unique_name ?? targetId;
+    targetReleaseId = found?.release_id;
   }
 
   // Resolve source (zip file or ability directory)
@@ -244,26 +247,18 @@ export async function updateCommand(
     opts.message ?? `Updated via openhome CLI — ${basename(sourcePath)}`;
 
   // Get the release_id for this ability
-  s?.start("Resolving release...");
-  let releaseId: string;
-  try {
-    const installed = await client.getInstalledCapabilityByCapability(targetId);
-    const rid =
-      installed.release_id ?? (installed.id ? String(installed.id) : undefined);
-    if (!rid) {
-      throw new Error(
-        "No release_id found — ability may not be installed on an agent yet.",
+  if (!targetReleaseId) {
+    if (opts.json)
+      jsonError(
+        "NO_RELEASE",
+        "No release version found for this ability. Try redeploying with: openhome deploy",
       );
-    }
-    releaseId = rid;
-    s?.stop("Release resolved.");
-  } catch (err) {
-    s?.stop("Failed to resolve release.");
-    const msg = err instanceof Error ? err.message : String(err);
-    if (opts.json) jsonError("ERROR", msg);
-    error(msg);
+    error(
+      "No release version found for this ability. Try redeploying with: openhome deploy",
+    );
     process.exit(1);
   }
+  const releaseId = targetReleaseId;
 
   // Build zip buffer
   let zipBuffer: Buffer;
