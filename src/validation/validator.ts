@@ -2,10 +2,10 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   REQUIRED_FILES,
+  RECOMMENDED_FILES,
   BLOCKED_IMPORTS,
   BLOCKED_PATTERNS,
   REQUIRED_PATTERNS,
-  REGISTER_CAPABILITY_PATTERN,
   HARDCODED_KEY_PATTERN,
   MULTIPLE_CLASSES_PATTERN,
 } from "./rules.js";
@@ -34,10 +34,9 @@ export function validateAbility(dirPath: string): ValidationResult {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
-  // 1. Check required files exist
+  // 1. Required files (errors)
   for (const required of REQUIRED_FILES) {
-    const fullPath = join(dirPath, required);
-    if (!existsSync(fullPath)) {
+    if (!existsSync(join(dirPath, required))) {
       errors.push({
         severity: "error",
         message: `Missing required file: ${required}`,
@@ -46,7 +45,18 @@ export function validateAbility(dirPath: string): ValidationResult {
     }
   }
 
-  // 2. Validate config.json
+  // 2. Recommended files (warnings)
+  for (const recommended of RECOMMENDED_FILES) {
+    if (!existsSync(join(dirPath, recommended))) {
+      warnings.push({
+        severity: "warning",
+        message: `Missing recommended file: ${recommended}`,
+        file: recommended,
+      });
+    }
+  }
+
+  // 3. Validate config.json
   const configPath = join(dirPath, "config.json");
   if (existsSync(configPath)) {
     const configContent = readFile(configPath);
@@ -89,17 +99,16 @@ export function validateAbility(dirPath: string): ValidationResult {
     });
   }
 
-  // 3. Validate main.py in detail
+  // 4. Validate main.py
   const mainPath = join(dirPath, "main.py");
   const mainContent = readFile(mainPath);
 
   if (mainContent) {
     const lines = mainContent.split("\n");
 
-    // Check blocked imports — only match actual import/from statements, not substrings in strings
+    // Blocked imports
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      // Skip lines that are clearly string content (inside quotes)
       if (
         !line.startsWith("import ") &&
         !line.startsWith("from ") &&
@@ -117,7 +126,7 @@ export function validateAbility(dirPath: string): ValidationResult {
       }
     }
 
-    // Check blocked patterns (line by line)
+    // Blocked patterns (line by line)
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       for (const { regex, message } of BLOCKED_PATTERNS) {
@@ -131,33 +140,23 @@ export function validateAbility(dirPath: string): ValidationResult {
       }
     }
 
-    // Check required patterns (whole file)
+    // Required patterns (whole file)
     for (const { regex, message } of REQUIRED_PATTERNS) {
       if (!regex.test(mainContent)) {
         errors.push({ severity: "error", message, file: "main.py" });
       }
     }
 
-    // Check register_capability tag
-    if (!REGISTER_CAPABILITY_PATTERN.test(mainContent)) {
-      errors.push({
-        severity: "error",
-        message: "Missing #{{register_capability}} tag in main.py",
-        file: "main.py",
-      });
-    }
-
-    // Check for hardcoded keys (warning)
-    const keyMatches = mainContent.match(HARDCODED_KEY_PATTERN);
-    if (keyMatches) {
+    // Hardcoded key warning
+    if (HARDCODED_KEY_PATTERN.test(mainContent)) {
       warnings.push({
         severity: "warning",
-        message: `Possible hardcoded API key detected in main.py — use capability_worker.get_single_key() instead`,
+        message: `Possible hardcoded API key detected — use capability_worker.get_single_key() instead`,
         file: "main.py",
       });
     }
 
-    // Check for multiple classes (warning)
+    // Multiple classes warning
     const classMatches = mainContent.match(MULTIPLE_CLASSES_PATTERN);
     if (classMatches && classMatches.length > 1) {
       warnings.push({
@@ -168,7 +167,7 @@ export function validateAbility(dirPath: string): ValidationResult {
     }
   }
 
-  // 4. Scan all .py files for blocked patterns
+  // 5. Scan other .py files for blocked patterns
   let pyFiles: string[] = [];
   try {
     pyFiles = readdirSync(dirPath).filter(

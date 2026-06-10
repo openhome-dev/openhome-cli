@@ -1,6 +1,13 @@
 import { getApiKey, getConfig, getApiBase } from "../config/store.js";
 import { ApiClient } from "../api/client.js";
-import { error, info, p, handleCancel } from "../ui/format.js";
+import {
+  error,
+  info,
+  p,
+  handleCancel,
+  jsonOut,
+  jsonError,
+} from "../ui/format.js";
 import { createAgentSocket } from "../ws/agent-socket.js";
 import chalk from "chalk";
 
@@ -8,18 +15,27 @@ const RESPONSE_TIMEOUT = 30_000;
 
 export async function triggerCommand(
   phraseArg?: string,
-  opts: { agent?: string } = {},
+  opts: { agent?: string; json?: boolean } = {},
 ): Promise<void> {
-  p.intro("⚡ Trigger an ability");
+  if (!opts.json) p.intro("⚡ Trigger an ability");
 
   const apiKey = getApiKey();
   if (!apiKey) {
+    if (opts.json)
+      jsonError("UNAUTHENTICATED", "Not authenticated. Run: openhome login", 2);
     error("Not authenticated. Run: openhome login");
     process.exit(1);
   }
 
   let phrase = phraseArg;
   if (!phrase) {
+    if (opts.json) {
+      jsonError(
+        "MISSING_PHRASE",
+        "Phrase required when using --json. Pass it as an argument.",
+      );
+      process.exit(1);
+    }
     const input = await p.text({
       message: "Trigger phrase (e.g. 'play aquaprime')",
       validate: (val) => {
@@ -33,6 +49,13 @@ export async function triggerCommand(
   let agentId = opts.agent ?? getConfig().default_personality_id;
 
   if (!agentId) {
+    if (opts.json) {
+      jsonError(
+        "NO_AGENT",
+        "No default agent set. Use --agent <id> or run: openhome agents",
+      );
+      process.exit(1);
+    }
     const s = p.spinner();
     s.start("Fetching agents...");
     try {
@@ -64,10 +87,11 @@ export async function triggerCommand(
     }
   }
 
-  info(`Sending "${chalk.bold(phrase)}" to agent ${chalk.bold(agentId)}...`);
+  if (!opts.json)
+    info(`Sending "${chalk.bold(phrase)}" to agent ${chalk.bold(agentId)}...`);
 
-  const s = p.spinner();
-  s.start("Waiting for response...");
+  const s = opts.json ? null : p.spinner();
+  s?.start("Waiting for response...");
 
   let fullResponse = "";
   let responseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -86,9 +110,19 @@ export async function triggerCommand(
       responseTimer = setTimeout(() => {
         if (!settled) {
           settled = true;
-          s.stop(fullResponse ? "Response received." : "Timed out.");
-          if (fullResponse)
+          s?.stop(fullResponse ? "Response received." : "Timed out.");
+          if (opts.json) {
+            if (fullResponse)
+              jsonOut({
+                ok: true,
+                agent_id: agentId,
+                phrase,
+                response: fullResponse,
+              });
+            else jsonError("TIMEOUT", "No response within 30s");
+          } else if (fullResponse) {
             console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+          }
           socket.close();
         }
       }, RESPONSE_TIMEOUT);
@@ -102,23 +136,35 @@ export async function triggerCommand(
           settled = true;
           if (responseTimer) clearTimeout(responseTimer);
           fullResponse = content;
-          s.stop("Response received.");
-          console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+          s?.stop("Response received.");
+          if (opts.json)
+            jsonOut({
+              ok: true,
+              agent_id: agentId,
+              phrase,
+              response: fullResponse,
+            });
+          else console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
           socket.close();
         }
       } else {
-        // accumulate streaming content
         fullResponse = content;
       }
     },
 
     onEvent(type) {
-      // audio-end with content already accumulated — treat as final
       if (type === "text" && fullResponse && !settled) {
         settled = true;
         if (responseTimer) clearTimeout(responseTimer);
-        s.stop("Response received.");
-        console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+        s?.stop("Response received.");
+        if (opts.json)
+          jsonOut({
+            ok: true,
+            agent_id: agentId,
+            phrase,
+            response: fullResponse,
+          });
+        else console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
         socket.close();
       }
     },
@@ -127,8 +173,9 @@ export async function triggerCommand(
       if (!settled) {
         settled = true;
         if (responseTimer) clearTimeout(responseTimer);
-        s.stop("Error.");
-        error(err.message);
+        s?.stop("Error.");
+        if (opts.json) jsonError("ERROR", err.message);
+        else error(err.message);
         socket.close();
       }
     },
