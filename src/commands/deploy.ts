@@ -1,6 +1,13 @@
 import { resolve, join, basename } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  createWriteStream,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import archiver from "archiver";
 import { ApiClient } from "../api/client.js";
 import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
@@ -17,6 +24,28 @@ function expandPath(p: string): string {
     return join(homedir(), p.slice(2));
   }
   return resolve(p);
+}
+
+/** Zip an ability directory as <dirName>/<files> — the structure deploy expects. */
+function zipAbilityDir(dirPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const dirName = basename(dirPath);
+    const outPath = join(tmpdir(), `openhome-deploy-${Date.now()}.zip`);
+    const output = createWriteStream(outPath);
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    output.on("close", () => {
+      try {
+        resolve(readFileSync(outPath));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    archive.on("error", reject);
+    archive.pipe(output);
+    // Files go under <dirName>/ — the top-level folder deploy requires
+    archive.directory(dirPath, dirName);
+    archive.finalize();
+  });
 }
 
 function scanForZips(
@@ -269,24 +298,40 @@ export async function deployCommand(
   };
 
   let zipBuffer: Buffer;
-  try {
-    zipBuffer = readFileSync(zipPath);
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EPERM" || code === "EACCES") {
-      const msg =
-        `Permission denied: macOS is blocking access to this file.\n` +
-        `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
-        `  Or move the zip: cp "${zipPath}" /tmp/${basename(zipPath)}`;
-      if (opts.json) jsonError("EPERM", msg);
+  const pathIsDir = existsSync(zipPath) && statSync(zipPath).isDirectory();
+  if (pathIsDir) {
+    const s2 = opts.json ? null : p.spinner();
+    s2?.start(`Zipping ${basename(zipPath)}/...`);
+    try {
+      zipBuffer = await zipAbilityDir(zipPath);
+      s2?.stop("Zipped.");
+    } catch (err) {
+      s2?.stop("Zip failed.");
+      const msg = `Failed to zip directory: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.json) jsonError("ZIP_ERROR", msg);
       error(msg);
-    } else {
-      const msg = `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`;
-      if (opts.json) jsonError("READ_ERROR", msg);
-      error(msg);
+      process.exit(1);
     }
-    process.exit(1);
-  }
+  } else {
+    try {
+      zipBuffer = readFileSync(zipPath);
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EACCES") {
+        const msg =
+          `Permission denied: macOS is blocking access to this file.\n` +
+          `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
+          `  Or move the zip: cp "${zipPath}" /tmp/${basename(zipPath)}`;
+        if (opts.json) jsonError("EPERM", msg);
+        error(msg);
+      } else {
+        const msg = `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`;
+        if (opts.json) jsonError("READ_ERROR", msg);
+        error(msg);
+      }
+      process.exit(1);
+    }
+  } // end else (zip file path)
 
   if (opts.mock) {
     const s = opts.json ? null : p.spinner();

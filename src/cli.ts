@@ -572,8 +572,8 @@ BEFORE running any JWT-required command, check first:
   → jwt_status: "expiring_soon" = warn the human, proceed
   → jwt_status: "expired" | "missing" = STOP, ask human to refresh
 
-Commands that need JWT:  list, delete, assign, status
-Commands that need only API key:  deploy, agents, chat, trigger, logs, validate, whoami
+Commands that need JWT:  delete, assign, status
+Commands that need only API key:  deploy, update, list, agents, chat, trigger, logs, validate, whoami
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## Auth Setup
@@ -618,17 +618,20 @@ validate  Check an ability for errors before deploying (no upload)
 
 ── Ability lifecycle ───────────────────────────────────────────────
 
-deploy   Upload an ability zip  [API key only]
-  openhome deploy <path.zip> --name "Name" --description "Desc" \\
+deploy   Upload a new ability  [API key only]
+  openhome deploy <path-or-dir> --name "Name" --description "Desc" \\
     --category skill --triggers "word1,word2" [--timeout 120] [--json]
   categories: skill | brain_skill | background_daemon | local
-  NOTE: deploy requires a pre-made .zip file — it does NOT auto-zip a directory.
-  To create the zip (must be from the PARENT directory, not from inside the folder):
-    cd /path/to/parent && zip -r my-ability.zip my-ability/
-    openhome deploy ./my-ability.zip --name "my-ability" ...
-  NOTE: no overwrite endpoint exists yet — delete old version first if renaming
+  → pass a directory (auto-zipped) or a pre-made .zip file
+  NOTE: no overwrite endpoint — use "update" to push new code to an existing ability
 
-list     Show all uploaded abilities  [JWT required]
+update   Push new code to an existing ability  [API key only]
+  openhome update <id|name> --zip <path-or-dir> [--message "msg"] [--json]
+  → accepts a directory (auto-zips flat) or a .zip file
+  → use this instead of delete+redeploy when iterating on ability code
+  → scans cwd/Desktop/Downloads/Documents for zips and ability dirs if --zip not given
+
+list     Show all uploaded abilities  [API key only]
   openhome list [--json]
   → returns id (numeric string e.g. "3501"), name, display_name, status,
     version, category, trigger_words (array), updated_at
@@ -646,8 +649,11 @@ agents   List agents and set default  [API key only]
   openhome agents [--json]
   → returns id (numeric string e.g. "123456"), name. Use name or id interchangeably.
 
-assign   Link abilities to an agent  [JWT required]
+assign   Link abilities to an agent  [JWT required]  ⚠ PARTIAL — server-side restrictions apply
   openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]
+  NOTE: The server returns "Not allowed to edit this personality" for most agents.
+  This is a server-side permission issue, not a CLI bug. If assign fails, use the
+  OpenHome dashboard UI to assign abilities instead: app.openhome.com
 
 ── Testing ─────────────────────────────────────────────────────────
 
@@ -691,25 +697,27 @@ mcp      Start OpenHome MCP voice server for Claude Code integration
 
   # 2. Get your agent ID/name
   openhome agents --json
-  # → pick an id or name from the returned list for use in assign/deploy
+  # → pick an id or name from the returned list
 
-  # 3. Validate before deploying
-  openhome validate ./my-ability
+  # 3. Validate before deploying (catches errors before hitting the API)
+  openhome validate ./my-ability --json
 
-  # 4. Zip the ability (from parent directory — required)
-  cd /path/to/parent && zip -r my-ability.zip my-ability/
-
-  # 5. Deploy
-  openhome deploy ./my-ability.zip --name "my-skill" --description "Does X" \\
+  # 4. Deploy — pass a directory, CLI auto-zips it correctly
+  openhome deploy ./my-ability --name "my-skill" --description "Does X" \\
     --category skill --triggers "activate" --json
 
-  # 6. Assign to agent (use id or name from step 2)
+  # 5. Assign to agent (use id or name from step 2)
+  #    ⚠ Server may return "Not allowed to edit this personality" for some agents.
+  #    If it fails, assign via the dashboard: app.openhome.com
   openhome assign --agent "My Agent" --capabilities my-skill --json
 
-  # 7. Test via chat
-  openhome chat <agent_id>
+  # 6. Test the ability fired correctly
+  openhome trigger "activate" --agent <agent_id> --json
 
-  # 8. Clean up old version if needed
+  # 7. Iterate — push new code without redeploying
+  openhome update my-skill --zip ./my-ability --json
+
+  # 8. Clean up old abilities if needed
   openhome delete <old_id> --yes --json
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
