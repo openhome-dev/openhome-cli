@@ -1,6 +1,13 @@
 import { resolve, join, basename } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  createWriteStream,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import archiver from "archiver";
 import { ApiClient } from "../api/client.js";
 import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
@@ -17,6 +24,28 @@ function expandPath(p: string): string {
     return join(homedir(), p.slice(2));
   }
   return resolve(p);
+}
+
+/** Zip an ability directory as <dirName>/<files> — the structure deploy expects. */
+function zipAbilityDir(dirPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const dirName = basename(dirPath);
+    const outPath = join(tmpdir(), `openhome-deploy-${Date.now()}.zip`);
+    const output = createWriteStream(outPath);
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    output.on("close", () => {
+      try {
+        resolve(readFileSync(outPath));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    archive.on("error", reject);
+    archive.pipe(output);
+    // Files go under <dirName>/ — the top-level folder deploy requires
+    archive.directory(dirPath, dirName);
+    archive.finalize();
+  });
 }
 
 function scanForZips(
@@ -138,8 +167,30 @@ export async function deployCommand(
   const zipName = basename(zipPath, ".zip");
   const defaultName = zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
+  // In JSON mode all required fields must be provided as flags — no prompts
+  if (opts.json) {
+    const missing: string[] = [];
+    if (!opts.name?.trim()) missing.push("--name");
+    if (!opts.description?.trim()) missing.push("--description");
+    if (
+      !opts.category ||
+      !["skill", "brain_skill", "background_daemon", "local"].includes(
+        opts.category,
+      )
+    )
+      missing.push("--category (skill|brain_skill|background_daemon|local)");
+    if (!opts.triggers?.trim()) missing.push("--triggers");
+    if (missing.length > 0) {
+      jsonError(
+        "MISSING_ARGS",
+        `Missing required flags in --json mode: ${missing.join(", ")}`,
+      );
+      process.exit(1);
+    }
+  }
+
   let name: string;
-  if (opts.name) {
+  if (opts.name?.trim()) {
     name = opts.name.trim();
   } else {
     const nameInput = await p.text({
@@ -154,7 +205,7 @@ export async function deployCommand(
   }
 
   let description: string;
-  if (opts.description) {
+  if (opts.description?.trim()) {
     description = opts.description.trim();
   } else {
     const descInput = await p.text({
@@ -215,16 +266,20 @@ export async function deployCommand(
       .filter(Boolean);
   }
 
-  const needsApiKeys = await p.confirm({
-    message: "Does this ability require third party API keys?",
-    initialValue: false,
-  });
-  handleCancel(needsApiKeys);
-  if (needsApiKeys) {
-    p.note(
-      "After deploying, go to your ability settings in the dashboard to add API keys.",
-      "Third Party API Keys",
-    );
+  let needsApiKeys = false;
+  if (!opts.json) {
+    const confirmed = await p.confirm({
+      message: "Does this ability require third party API keys?",
+      initialValue: false,
+    });
+    handleCancel(confirmed);
+    needsApiKeys = confirmed as boolean;
+    if (needsApiKeys) {
+      p.note(
+        "After deploying, go to your ability settings in the dashboard to add API keys.",
+        "Third Party API Keys",
+      );
+    }
   }
 
   const personalityId = opts.personality ?? getConfig().default_personality_id;
@@ -243,24 +298,40 @@ export async function deployCommand(
   };
 
   let zipBuffer: Buffer;
-  try {
-    zipBuffer = readFileSync(zipPath);
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EPERM" || code === "EACCES") {
-      const msg =
-        `Permission denied: macOS is blocking access to this file.\n` +
-        `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
-        `  Or move the zip: cp "${zipPath}" /tmp/${basename(zipPath)}`;
-      if (opts.json) jsonError("EPERM", msg);
+  const pathIsDir = existsSync(zipPath) && statSync(zipPath).isDirectory();
+  if (pathIsDir) {
+    const s2 = opts.json ? null : p.spinner();
+    s2?.start(`Zipping ${basename(zipPath)}/...`);
+    try {
+      zipBuffer = await zipAbilityDir(zipPath);
+      s2?.stop("Zipped.");
+    } catch (err) {
+      s2?.stop("Zip failed.");
+      const msg = `Failed to zip directory: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.json) jsonError("ZIP_ERROR", msg);
       error(msg);
-    } else {
-      const msg = `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`;
-      if (opts.json) jsonError("READ_ERROR", msg);
-      error(msg);
+      process.exit(1);
     }
-    process.exit(1);
-  }
+  } else {
+    try {
+      zipBuffer = readFileSync(zipPath);
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EACCES") {
+        const msg =
+          `Permission denied: macOS is blocking access to this file.\n` +
+          `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
+          `  Or move the zip: cp "${zipPath}" /tmp/${basename(zipPath)}`;
+        if (opts.json) jsonError("EPERM", msg);
+        error(msg);
+      } else {
+        const msg = `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`;
+        if (opts.json) jsonError("READ_ERROR", msg);
+        error(msg);
+      }
+      process.exit(1);
+    }
+  } // end else (zip file path)
 
   if (opts.mock) {
     const s = opts.json ? null : p.spinner();
