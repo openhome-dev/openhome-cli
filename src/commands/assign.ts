@@ -22,7 +22,21 @@ export async function assignCommand(
     json?: boolean;
   } = {},
 ): Promise<void> {
-  if (!opts.json) p.intro("🔗 Assign abilities to agent");
+  // Server-side permission restrictions make this unreliable for most agents.
+  // Redirect users to the dashboard until the API is fixed.
+  if (opts.json) {
+    jsonError(
+      "COMING_SOON",
+      "assign is not yet fully supported via CLI — the server blocks edits on most agents. Assign abilities at app.openhome.com instead.",
+    );
+    process.exit(1);
+  }
+  p.intro("🔗 Assign abilities to agent");
+  p.note(
+    "The server currently blocks CLI-based assignment for most agents.\nAssign abilities at: app.openhome.com",
+    "⚠ Coming Soon",
+  );
+  process.exit(0);
 
   let client: ApiClient | MockApiClient;
 
