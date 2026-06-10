@@ -129,6 +129,12 @@ export async function assignCommand(
       }
       chosenIds.push(match.ability_id);
     }
+  } else if (opts.json) {
+    jsonError(
+      "MISSING_ARGS",
+      "In --json mode, --agent <id> and --capabilities <ids> are required.",
+    );
+    process.exit(1);
   } else {
     // Interactive path
     const selectedAgent = await p.select({

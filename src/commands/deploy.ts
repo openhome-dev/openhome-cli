@@ -138,8 +138,30 @@ export async function deployCommand(
   const zipName = basename(zipPath, ".zip");
   const defaultName = zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
+  // In JSON mode all required fields must be provided as flags — no prompts
+  if (opts.json) {
+    const missing: string[] = [];
+    if (!opts.name?.trim()) missing.push("--name");
+    if (!opts.description?.trim()) missing.push("--description");
+    if (
+      !opts.category ||
+      !["skill", "brain_skill", "background_daemon", "local"].includes(
+        opts.category,
+      )
+    )
+      missing.push("--category (skill|brain_skill|background_daemon|local)");
+    if (!opts.triggers?.trim()) missing.push("--triggers");
+    if (missing.length > 0) {
+      jsonError(
+        "MISSING_ARGS",
+        `Missing required flags in --json mode: ${missing.join(", ")}`,
+      );
+      process.exit(1);
+    }
+  }
+
   let name: string;
-  if (opts.name) {
+  if (opts.name?.trim()) {
     name = opts.name.trim();
   } else {
     const nameInput = await p.text({
@@ -154,7 +176,7 @@ export async function deployCommand(
   }
 
   let description: string;
-  if (opts.description) {
+  if (opts.description?.trim()) {
     description = opts.description.trim();
   } else {
     const descInput = await p.text({
@@ -215,16 +237,20 @@ export async function deployCommand(
       .filter(Boolean);
   }
 
-  const needsApiKeys = await p.confirm({
-    message: "Does this ability require third party API keys?",
-    initialValue: false,
-  });
-  handleCancel(needsApiKeys);
-  if (needsApiKeys) {
-    p.note(
-      "After deploying, go to your ability settings in the dashboard to add API keys.",
-      "Third Party API Keys",
-    );
+  let needsApiKeys = false;
+  if (!opts.json) {
+    const confirmed = await p.confirm({
+      message: "Does this ability require third party API keys?",
+      initialValue: false,
+    });
+    handleCancel(confirmed);
+    needsApiKeys = confirmed as boolean;
+    if (needsApiKeys) {
+      p.note(
+        "After deploying, go to your ability settings in the dashboard to add API keys.",
+        "Third Party API Keys",
+      );
+    }
   }
 
   const personalityId = opts.personality ?? getConfig().default_personality_id;
