@@ -1,4 +1,5 @@
-export const REQUIRED_FILES = ["main.py", "README.md", "__init__.py"];
+export const REQUIRED_FILES = ["main.py", "__init__.py"];
+export const RECOMMENDED_FILES = ["README.md"];
 
 export const BLOCKED_IMPORTS = [
   "redis",
@@ -63,8 +64,6 @@ export const REQUIRED_PATTERNS: RequiredPattern[] = [
     message: "Must declare capability_worker: CapabilityWorker = None",
   },
 ];
-
-export const REGISTER_CAPABILITY_PATTERN = /#\s?\{\{register[_ ]capability\}\}/;
 
 export const HARDCODED_KEY_PATTERN = /(sk_|sk-|key_)[a-zA-Z0-9]{20,}/;
 

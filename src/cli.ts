@@ -371,9 +371,12 @@ program
   .command("trigger [phrase]")
   .description("Send a trigger phrase to fire an ability remotely")
   .option("--agent <id>", "Agent ID (uses default if not set)")
-  .action(async (phrase?: string, opts?: { agent?: string }) => {
-    await triggerCommand(phrase, opts);
-  });
+  .option("--json", "Output machine-readable JSON")
+  .action(
+    async (phrase?: string, opts?: { agent?: string; json?: boolean }) => {
+      await triggerCommand(phrase, opts);
+    },
+  );
 
 program
   .command("list")
