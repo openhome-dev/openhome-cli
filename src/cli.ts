@@ -98,13 +98,34 @@ async function checkForUpdates(): Promise<void> {
       );
       process.exit(0);
     } else {
-      // Global install — show one-line notice, don't block
+      // Global install — auto-update then re-exec
+      const { execFileSync } = await import("node:child_process");
       const { default: chalk } = await import("chalk");
       console.log(
-        chalk.yellow(
-          `  Update available: v${version} → v${latest}   Run: npm install -g openhome-cli@latest\n`,
-        ),
+        chalk.yellow(`  Updating openhome-cli ${version} → ${latest}...\n`),
       );
+      try {
+        execFileSync("npm", ["install", "-g", `openhome-cli@${latest}`], {
+          stdio: "inherit",
+        });
+        // Re-exec the now-updated binary with the same args
+        const globalBin = execFileSync("npm", ["bin", "-g"], {
+          encoding: "utf8",
+        }).trim();
+        const newBin = `${globalBin}/openhome`;
+        execFileSync(newBin, process.argv.slice(2), {
+          stdio: "inherit",
+          env: { ...process.env, OPENHOME_NO_UPDATE: "1" },
+        });
+        process.exit(0);
+      } catch {
+        // Auto-update failed — fall back to manual instruction
+        console.log(
+          chalk.yellow(
+            `  Auto-update failed. Run manually: npm install -g openhome-cli@latest\n`,
+          ),
+        );
+      }
     }
   } catch {
     // Network timeout or error — continue silently
