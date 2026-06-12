@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  writeFileSync,
+  readFileSync,
+  unlinkSync,
+  mkdirSync,
+  mkdtempSync,
+  chmodSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "../api/client.js";
 import { getApiKey, getApiBase } from "../config/store.js";
@@ -72,13 +79,39 @@ export async function agentsEditCommand(agentArg?: string): Promise<void> {
   );
 
   const currentDescription = agent.description ?? "";
-  const tmpFile = join(
-    tmpdir(),
-    `openhome-agent-${agent.id}-${Date.now()}.txt`,
-  );
+
+  // Write the agent prompt to a per-user private directory rather than
+  // the world-readable /tmp on Linux. On most Linuxes /tmp is mode
+  // 1777 and an attacker on the same box could read the file while
+  // the editor session is open. We use mkdtemp under ~/.openhome/tmp
+  // (parent dir 0o700) and chmod the file 0o600 — both unconditional,
+  // not platform-dependent.
+  const baseTmp = join(homedir(), ".openhome", "tmp");
+  try {
+    mkdirSync(baseTmp, { recursive: true, mode: 0o700 });
+    // Tighten in case the dir existed with looser perms.
+    chmodSync(baseTmp, 0o700);
+  } catch {
+    // mkdtemp() below will surface any fatal error.
+  }
+
+  let tmpDir: string;
+  try {
+    tmpDir = mkdtempSync(join(baseTmp, "agent-edit-"));
+  } catch {
+    // Last-resort fallback to os.tmpdir() — we still set 0o600 on the
+    // file so a co-resident attacker would need to win a tight race
+    // and read the open file before chmod.
+    tmpDir = tmpdir();
+  }
+  const tmpFile = join(tmpDir, `openhome-agent-${agent.id}-${Date.now()}.txt`);
 
   try {
-    writeFileSync(tmpFile, currentDescription, "utf8");
+    writeFileSync(tmpFile, currentDescription, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    chmodSync(tmpFile, 0o600);
   } catch {
     error("Could not write temp file for editing.");
     process.exit(1);

@@ -54,7 +54,18 @@ async function checkForUpdates(): Promise<void> {
 
     let latest: string | undefined;
 
-    if (now - lastCheck < UPDATE_CHECK_INTERVAL && cached) {
+    // Tighter semver shape than the prior /^\d+\.\d+\.\d+$/: bound each
+    // component to <=5 digits (no 100-digit overflow attempts) and the
+    // total to <=32 chars. Anything else is treated as poisoned, even
+    // from the npm registry response or the cache.
+    const SEMVER_RX = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/;
+    const isValidVersion = (v: string | null | undefined): v is string =>
+      typeof v === "string" && v.length <= 32 && SEMVER_RX.test(v);
+
+    if (now - lastCheck < UPDATE_CHECK_INTERVAL && isValidVersion(cached)) {
+      // Re-validate the cached value on every read — a config file
+      // written by an older CLI version that lacked validation cannot
+      // poison the re-exec path.
       latest = cached;
     } else {
       const res = await fetch(
@@ -62,16 +73,15 @@ async function checkForUpdates(): Promise<void> {
         { signal: AbortSignal.timeout(2000) },
       );
       const data = (await res.json()) as { version?: string };
-      latest = data.version;
-      if (latest && /^\d+\.\d+\.\d+$/.test(latest)) {
+      if (isValidVersion(data.version)) {
+        latest = data.version;
         config.last_version_check = now;
         config.latest_version_cache = latest;
         saveConfig(config);
       }
     }
-    // Validate semver format before using — guards against poisoned registry responses
     if (!latest || latest === version) return;
-    if (!/^\d+\.\d+\.\d+$/.test(latest)) return;
+    if (!isValidVersion(latest)) return;
 
     // Only act if npm version is strictly newer
     const toNum = (v: string) =>
