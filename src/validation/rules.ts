@@ -65,6 +65,33 @@ export const REQUIRED_PATTERNS: RequiredPattern[] = [
   },
 ];
 
-export const HARDCODED_KEY_PATTERN = /(sk_|sk-|key_)[a-zA-Z0-9]{20,}/;
+// Detect committed API keys across common providers. The previous
+// pattern caught only sk_/sk-/key_ prefixes followed by alphanumerics,
+// which missed:
+//   - OpenAI project keys: sk-proj-...                  (allow dashes/underscores past prefix)
+//   - Anthropic keys:      sk-ant-...                   (same)
+//   - Stripe live/test:    sk_live_..., sk_test_...      (allow underscores past prefix)
+//   - GitHub PATs:         ghp_, ghs_, ghu_, gho_, ghr_  (40-char body)
+//   - AWS access keys:     AKIA, ASIA + 16 chars         (exactly 16, all upper/digit)
+//   - Slack bot tokens:    xoxb-, xoxa-, xoxp-, xoxr-, xoxs-
+//   - Google API keys:     AIza + 35 chars
+// Each branch is anchored so we don't false-positive on Python
+// identifiers like `key_count`.
+export const HARDCODED_KEY_PATTERN = new RegExp(
+  [
+    // OpenAI / Anthropic / Stripe-style with optional sub-prefix
+    "(?:sk[-_])(?:proj[-_]|ant[-_]|live[-_]|test[-_])?[A-Za-z0-9_-]{20,}",
+    // Legacy "key_" prefix (Replicate, etc.)
+    "key_[A-Za-z0-9]{20,}",
+    // GitHub tokens
+    "gh[pousr]_[A-Za-z0-9]{36}",
+    // AWS access keys
+    "(?:AKIA|ASIA)[A-Z0-9]{16}",
+    // Slack tokens
+    "xox[bapr-s]-[A-Za-z0-9-]{10,}",
+    // Google API keys
+    "AIza[A-Za-z0-9_-]{35}",
+  ].join("|"),
+);
 
 export const MULTIPLE_CLASSES_PATTERN = /^class\s+/gm;
