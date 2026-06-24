@@ -1,5 +1,10 @@
 # OpenHome CLI
 
+---
+This CLI tool will no longer be updated and has been deprecated. 
+Please refer to the [Open Home docs](https://docs.openhome.com/guides/getting-started/cli#openhome-cli) for latest version. 
+We encourge you to fork this tool and explore what's possible on the Open Home platform. 
+---
 Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
 **Version:** v0.1.40
